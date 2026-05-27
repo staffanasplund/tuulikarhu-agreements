@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tuulikarhu-agreements
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: SERVICE_ACCOUNT_JSON
+        sync: false          # paste value in Render dashboard (marked secret)
+      - key: DB_FILE_ID
+        sync: false
+      - key: FOLDER_ID
+        sync: false
+      - key: DASHBOARD_USERNAME
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false

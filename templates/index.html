@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tuulikarhu Oy — Agreements Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background: #f5f6f8; color: #1f2937; line-height: 1.45; }
+
+  /* ── header ── */
+  header { background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%); color: white; padding: 24px 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  header h1 { margin: 0 0 4px 0; font-size: 24px; font-weight: 600; }
+  header .sub { font-size: 13px; opacity: 0.85; }
+  header .stats { margin-top: 12px; display: flex; gap: 24px; font-size: 13px; flex-wrap: wrap; }
+  header .stats span strong { font-size: 18px; display: block; }
+
+  /* ── nav ── */
+  nav { background: white; padding: 0 32px; border-bottom: 1px solid #e5e7eb; display: flex; gap: 4px; overflow-x: auto; }
+  nav button { background: none; border: none; padding: 14px 18px; cursor: pointer; font-size: 14px; color: #4b5563; border-bottom: 3px solid transparent; font-weight: 500; white-space: nowrap; }
+  nav button.active { color: #1e3a5f; border-bottom-color: #1e3a5f; }
+  nav button:hover { background: #f9fafb; }
+
+  /* ── main panels ── */
+  main { padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
+  .panel { background: white; border-radius: 8px; padding: 20px 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); border: 1px solid #e5e7eb; }
+  .panel h2 { margin: 0 0 14px 0; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .panel h2 .count { background: #eef2ff; color: #3730a3; font-size: 12px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+  .panel h2.urgent .count { background: #fee2e2; color: #991b1b; }
+  .panel h2.warn   .count { background: #fef3c7; color: #92400e; }
+  .panel h2.new    .count { background: #dcfce7; color: #166534; }
+
+  /* ── tables ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 10px 12px; background: #f9fafb; color: #4b5563; font-weight: 600; border-bottom: 1px solid #e5e7eb; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+  tr:hover td { background: #fafbfc; }
+  tr:last-child td { border-bottom: none; }
+
+  /* ── category tags ── */
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .tag-NDA         { background: #e0e7ff; color: #3730a3; }
+  .tag-Framework   { background: #cffafe; color: #155e75; }
+  .tag-Cooperation { background: #f0fdf4; color: #166534; }
+  .tag-SHA         { background: #fae8ff; color: #86198f; }
+  .tag-SPA         { background: #fff7ed; color: #9a3412; }
+  .tag-Loan        { background: #fed7aa; color: #9a3412; }
+  .tag-Service     { background: #e0f2fe; color: #0369a1; }
+  .tag-Development { background: #fef9c3; color: #854d0e; }
+  .tag-Commitment  { background: #f1f5f9; color: #334155; }
+  .tag-Protocol    { background: #ede9fe; color: #5b21b6; }
+  .tag-SPV         { background: #fce7f3; color: #9f1239; }
+  .tag-Admin       { background: #f3f4f6; color: #374151; }
+  .tag-Other       { background: #e5e7eb; color: #374151; }
+
+  /* ── badges ── */
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+  .badge-urgent { background: #fee2e2; color: #991b1b; }
+  .badge-warn   { background: #fef3c7; color: #92400e; }
+  .badge-info   { background: #dbeafe; color: #1e40af; }
+  .badge-ok     { background: #dcfce7; color: #166534; }
+  .badge-muted  { background: #f3f4f6; color: #6b7280; }
+
+  /* ── misc ── */
+  .empty   { padding: 40px 20px; text-align: center; color: #6b7280; font-size: 14px; }
+  .loading { padding: 60px 20px; text-align: center; color: #6b7280; font-size: 14px; }
+  .info-box { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 16px 20px; border-radius: 4px; font-size: 13px; line-height: 1.6; }
+  .info-box h3 { margin: 0 0 8px 0; font-size: 14px; color: #92400e; }
+  .info-box code { background: #fef3c7; padding: 1px 6px; border-radius: 3px; font-size: 12px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .info-box ol { margin: 8px 0 0 0; padding-left: 20px; }
+  .info-box ol li { margin-bottom: 6px; }
+  .filters { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .filters select, .filters input { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; background: white; }
+  .filters input[type="search"] { min-width: 240px; }
+  .view { display: none; }
+  .view.active { display: block; }
+  details summary { cursor: pointer; padding: 4px 0; font-size: 13px; color: #2563eb; }
+  details[open] summary { margin-bottom: 8px; }
+  .dismiss-btn { background: none; border: 1px solid #d1d5db; border-radius: 4px; padding: 1px 6px; font-size: 11px; color: #6b7280; cursor: pointer; margin-left: 6px; }
+  .dismiss-btn:hover { background: #f3f4f6; }
+
+  footer { padding: 20px 32px; text-align: center; color: #9ca3af; font-size: 12px; }
+
+  @media print {
+    nav, .info-box, footer, .filters { display: none; }
+    header { background: white !important; color: black !important; }
+    .panel { box-shadow: none; border: 1px solid #ccc; }
+    .view { display: block !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Tuulikarhu Oy — Agreements Dashboard</h1>
+  <div class="sub">Tracker for signed agreements, payments due, expirations and obligations.</div>
+  <div class="stats" id="header-stats">
+    <span style="opacity:0.7;">Loading data…</span>
+  </div>
+</header>
+
+<nav>
+  <button class="nav-btn active" data-view="home">Front page</button>
+  <button class="nav-btn" data-view="index">Full index</button>
+  <button class="nav-btn" data-view="payments">Payments &amp; dates</button>
+  <button class="nav-btn" data-view="obligations">Our obligations</button>
+  <button class="nav-btn" data-view="help">How to correct data</button>
+</nav>
+
+<main>
+
+  <!-- ── Front page ── -->
+  <div class="view active" id="view-home">
+    <div class="panel">
+      <h2 class="urgent">Needs attention <span class="count" id="att-count">—</span></h2>
+      <div id="attention-list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="panel">
+      <h2 class="new">Added in the last 7 days <span class="count" id="recent-count">—</span></h2>
+      <div id="recent-list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="panel">
+      <div class="info-box">
+        <h3>How to correct the data on this dashboard</h3>
+        <p>If an agreement is missing, an issue has been wrongly flagged, or any field is incorrect, you have three options:</p>
+        <ol>
+          <li><strong>Ask Claude (easiest)</strong> — in Cowork or Claude Code, say e.g. <em>"In the TUULIKARHU agreements database, mark the NDA with ACME Oy as reviewed"</em> or <em>"Add the missing service agreement <code>filename.pdf</code> with counterparty X, signed 2026-04-12"</em>. Claude will edit <code>agreements_database.json</code> on Google Drive and the dashboard will update on next page refresh.</li>
+          <li><strong>Dismiss a flag</strong> — click the <em>dismiss</em> button next to any flag in the "Needs attention" panel. The dismissal is saved to Google Drive.</li>
+          <li><strong>Edit the JSON directly</strong> — open <code>agreements_database.json</code> in Google Drive and edit the relevant entry. Refresh the page to see the change.</li>
+        </ol>
+        <p style="margin-top:10px;"><strong>Auto-scan:</strong> run <code>python build_database.py</code> again at any time to re-scan all files and refresh the database.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Full index ── -->
+  <div class="view" id="view-index">
+    <div class="panel">
+      <h2>Full agreement index <span class="count" id="idx-count">—</span></h2>
+      <div class="filters">
+        <input type="search" id="filter-search" placeholder="Search title, counterparty, file name…">
+        <select id="filter-category"><option value="">All categories</option></select>
+        <select id="filter-status">
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="expired">Expired</option>
+          <option value="terminated">Terminated</option>
+          <option value="review">Review</option>
+        </select>
+      </div>
+      <div id="index-table"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- ── Payments & dates ── -->
+  <div class="view" id="view-payments">
+    <div class="panel">
+      <h2>Upcoming payments &amp; key dates</h2>
+      <p style="font-size:13px;color:#6b7280;margin-top:0;">All payment-schedule items, expiry dates, renewal-notice deadlines and maturity dates sorted by date.</p>
+      <div id="payments-table"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- ── Our obligations ── -->
+  <div class="view" id="view-obligations">
+    <div class="panel">
+      <h2>Our ongoing obligations</h2>
+      <p style="font-size:13px;color:#6b7280;margin-top:0;">Non-compete, non-solicit, confidentiality and other continuing obligations.</p>
+      <div id="obligations-table"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- ── Help ── -->
+  <div class="view" id="view-help">
+    <div class="panel">
+      <h2>How this app works</h2>
+      <p style="font-size:13px;">Data lives in <code>agreements_database.json</code> on Google Drive. The dashboard reads it live on every page load — no rebuild needed. Run <code>python app.py</code> (or double-click <code>run.bat</code>) to start the server.</p>
+
+      <h3 style="font-size:14px;">Adding an agreement</h3>
+      <p style="font-size:13px;">Upload the signed PDF/DOCX to the matching zip archive or a subfolder on Google Drive, then run <code>python build_database.py</code> to re-extract and refresh the database.</p>
+
+      <h3 style="font-size:14px;">Correcting metadata</h3>
+      <p style="font-size:13px;">Tell Claude: <em>"In the TUULIKARHU database, change the expiry date of &lt;agreement&gt; to 2027-12-31"</em>. Logged in <code>manual_corrections_log</code>. Then refresh.</p>
+
+      <h3 style="font-size:14px;">Sharing</h3>
+      <p style="font-size:13px;">Anyone on the same machine (or same LAN if you run <code>app.run(host="0.0.0.0")</code>) can open the dashboard in a browser. The Google Drive JSON file remains the single source of truth.</p>
+
+      <h3 style="font-size:14px;">Attention rules</h3>
+      <ul style="font-size:13px;">
+        <li>Payment due within 30 days</li>
+        <li>Term ending within 90 days</li>
+        <li>Renewal notice deadline within 60 days</li>
+        <li>Non-compete ending within 30 days</li>
+        <li>Loan maturity within 30 days</li>
+        <li>Status = "review" always flagged</li>
+        <li>Added in last 7 days shown on front page</li>
+        <li>Missing parties / signed_date / category flagged (Protocol category excluded)</li>
+      </ul>
+
+      <h3 style="font-size:14px;">API</h3>
+      <p style="font-size:13px;">
+        <code>GET /api/data</code> — returns the full <code>agreements_database.json</code><br>
+        <code>POST /api/dismiss</code> — body: <code>{"agreement_id":"…","flag_type":"expired"}</code><br>
+        <code>POST /api/update</code> — body: <code>{"agreement_id":"…","field":"status","value":"terminated"}</code>
+      </p>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  Tuulikarhu Oy &middot; Data source: <code>agreements_database.json</code> on Google Drive &middot; Last updated: <span id="footer-updated">—</span>
+</footer>
+
+<script>
+(async function () {
+  "use strict";
+
+  // ── date helpers ──────────────────────────────────────────────────────────
+  const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
+  const ISO          = d => d ? new Date(d).toISOString().slice(0, 10) : "";
+  const daysBetween  = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000);
+
+  // ── load data ─────────────────────────────────────────────────────────────
+  let DATA;
+  try {
+    const resp = await fetch("/api/data");
+    DATA = await resp.json();
+  } catch (e) {
+    DATA = { agreements: [], categories: {}, attention_rules: {}, dismissed_flags: [], metadata: {} };
+    document.getElementById("header-stats").innerHTML =
+      '<span style="color:#fca5a5;">⚠ Could not load agreements_database.json</span>';
+  }
+
+  const RULES = Object.assign({
+    payment_due_within_days:        30,
+    term_ending_within_days:        90,
+    renewal_notice_within_days:     60,
+    non_compete_ending_within_days: 30,
+    recently_added_within_days:      7,
+    missing_metadata_flags:         ["all_parties", "signed_date", "category"],
+    missing_metadata_flags_skip_categories: ["Protocol"],
+  }, DATA.attention_rules || {});
+
+  const DISMISSED = new Set(
+    (DATA.dismissed_flags || []).map(f => f.agreement_id + "::" + f.flag_type)
+  );
+
+  // ── flag computation ───────────────────────────────────────────────────────
+  function computeFlags(a) {
+    const flags = [];
+    const add = (type, severity, message, date) => {
+      if (!DISMISSED.has(a.id + "::" + type))
+        flags.push({ type, severity, message, date });
+    };
+    const skipCats = RULES.missing_metadata_flags_skip_categories || [];
+    if (!skipCats.includes(a.category)) {
+      (RULES.missing_metadata_flags || []).forEach(field => {
+        const v = a[field];
+        if (v === undefined || v === null || v === "" || (Array.isArray(v) && v.length === 0))
+          add("missing_" + field, "warn", "Missing " + field.replace(/_/g, " "));
+      });
+    }
+    if (a.expiry_date) {
+      const days = daysBetween(a.expiry_date, TODAY);
+      if (days < 0)
+        add("expired", "info", "Expired " + (-days) + " days ago (" + a.expiry_date + ")", a.expiry_date);
+      else if (days <= RULES.term_ending_within_days)
+        add("term_ending", "urgent", "Term ends in " + days + " days (" + a.expiry_date + ")", a.expiry_date);
+    }
+    if (a.renewal_notice_deadline) {
+      const days = daysBetween(a.renewal_notice_deadline, TODAY);
+      if (days >= 0 && days <= RULES.renewal_notice_within_days)
+        add("renewal_notice", "urgent", "Renewal notice deadline in " + days + " days (" + a.renewal_notice_deadline + ")", a.renewal_notice_deadline);
+    }
+    if (a.non_compete_end_date) {
+      const days = daysBetween(a.non_compete_end_date, TODAY);
+      if (days >= 0 && days <= RULES.non_compete_ending_within_days)
+        add("non_compete_ending", "info", "Non-compete ends in " + days + " days (" + a.non_compete_end_date + ")", a.non_compete_end_date);
+    }
+    (a.payment_schedule || []).forEach(p => {
+      if (!p.due_date || p.paid) return;
+      const days = daysBetween(p.due_date, TODAY);
+      if (days < 0)
+        add("payment_overdue", "urgent", "Overdue payment " + (p.amount || "") + " " + (a.currency || "") + " (" + (-days) + " days, " + p.due_date + ")", p.due_date);
+      else if (days <= RULES.payment_due_within_days)
+        add("payment_due_soon", "warn", "Payment due in " + days + " days: " + (p.amount || "") + " " + (a.currency || "") + " (" + p.due_date + ")", p.due_date);
+    });
+    if (a.maturity_date) {
+      const days = daysBetween(a.maturity_date, TODAY);
+      if (days >= 0 && days <= RULES.payment_due_within_days)
+        add("loan_maturity", "warn", "Loan matures in " + days + " days (" + a.maturity_date + ")", a.maturity_date);
+    }
+    if (a.long_stop_date) {
+      const days = daysBetween(a.long_stop_date, TODAY);
+      if (days >= 0 && days <= (RULES.long_stop_warning_within_days || 60))
+        add("long_stop", "warn", "Long-stop date in " + days + " days (" + a.long_stop_date + ")", a.long_stop_date);
+    }
+    if (a.status === "review") add("status_review", "warn", "Status: review — needs checking");
+    return flags;
+  }
+
+  DATA.agreements = (DATA.agreements || []).map(a =>
+    Object.assign({}, a, { _flags: computeFlags(a) })
+  );
+
+  // ── header stats ──────────────────────────────────────────────────────────
+  const stats = {
+    total:            DATA.agreements.length,
+    needs_attention:  DATA.agreements.filter(a => a._flags.length).length,
+    recent:           DATA.agreements.filter(a => a.added_to_folder_date &&
+                        daysBetween(TODAY, a.added_to_folder_date) <= RULES.recently_added_within_days).length,
+    active:           DATA.agreements.filter(a => (a.status || "active") === "active").length,
+  };
+  document.getElementById("header-stats").innerHTML =
+    "<span><strong>" + stats.total            + "</strong>tracked</span>" +
+    "<span><strong>" + stats.active           + "</strong>active</span>" +
+    "<span><strong>" + stats.needs_attention  + "</strong>need attention</span>" +
+    "<span><strong>" + stats.recent           + "</strong>added last week</span>";
+  document.getElementById("footer-updated").textContent =
+    (DATA.metadata && DATA.metadata.last_updated) || "—";
+
+  // ── rendering helpers ─────────────────────────────────────────────────────
+  function catTag(c) {
+    const label = (DATA.categories && DATA.categories[c] && DATA.categories[c].label) || c || "—";
+    return '<span class="tag tag-' + (c || "Other") + '">' + label + "</span>";
+  }
+  function sevCls(s) {
+    return ({ urgent: "badge-urgent", warn: "badge-warn", info: "badge-info" })[s] || "badge-muted";
+  }
+  function counterparties(a) {
+    const all = (a.all_parties && a.all_parties.length)
+      ? a.all_parties
+      : (a.counterparties || []).concat(a.self_parties || []);
+    if (!all.length) return '<em style="color:#9ca3af;">(none recorded)</em>';
+    const cps = new Set(a.counterparties || []);
+    return all.map(p =>
+      cps.has(p) ? '<strong>' + p + '</strong>' : '<span style="color:#6b7280;">' + p + '</span>'
+    ).join(", ");
+  }
+  function fileLink(a) {
+    const url  = a.file_path || a.gdrive_url;
+    const name = a.file_name || "—";
+    if (!url) return name;
+    return '<a href="' + encodeURI(url) + '" target="_blank">' + name + '</a>';
+  }
+  function driveLink(a) {
+    const url = a.file_path || a.gdrive_url;
+    if (!url) return "";
+    return ' <a href="' + encodeURI(url) + '" target="_blank" style="font-size:11px;color:#2563eb;">GDrive ↗</a>';
+  }
+  function emptyState(msg) { return '<div class="empty">' + msg + '</div>'; }
+
+  // ── dismiss helper ────────────────────────────────────────────────────────
+  async function dismissFlag(agreementId, flagType, btn) {
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+      const r = await fetch("/api/dismiss", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agreement_id: agreementId, flag_type: flagType })
+      });
+      if ((await r.json()).ok) {
+        DISMISSED.add(agreementId + "::" + flagType);
+        const ag = DATA.agreements.find(a => a.id === agreementId);
+        if (ag) ag._flags = computeFlags(ag);
+        stats.needs_attention = DATA.agreements.filter(a => a._flags.length).length;
+        renderAttention();
+      }
+    } catch (e) { btn.disabled = false; btn.textContent = "dismiss"; }
+  }
+
+  // ── render: attention ─────────────────────────────────────────────────────
+  function renderAttention() {
+    const items = DATA.agreements.filter(a => a._flags.length);
+    document.getElementById("att-count").textContent = items.length;
+    const el = document.getElementById("attention-list");
+    if (!items.length) { el.innerHTML = emptyState("Nothing needs attention right now. ✓"); return; }
+    const sevRank = { urgent: 0, warn: 1, info: 2 };
+    items.sort((a, b) =>
+      Math.min(...a._flags.map(f => sevRank[f.severity] ?? 3)) -
+      Math.min(...b._flags.map(f => sevRank[f.severity] ?? 3))
+    );
+    el.innerHTML =
+      '<table><thead><tr><th>Agreement</th><th>Category</th><th>Counterparty</th><th>Flags</th></tr></thead><tbody>' +
+      items.map(a =>
+        '<tr><td><strong>' + (a.title || a.file_name || a.id) + '</strong>' +
+        driveLink(a) +
+        '</td><td>' + catTag(a.category) + '</td><td>' + counterparties(a) + '</td><td>' +
+        a._flags.map(f =>
+          '<div style="margin-bottom:2px;">' +
+          '<span class="badge ' + sevCls(f.severity) + '">' + f.severity + '</span> ' + f.message +
+          ' <button class="dismiss-btn" data-id="' + a.id + '" data-flag="' + f.type + '">dismiss</button>' +
+          '</div>'
+        ).join("") +
+        '</td></tr>'
+      ).join("") +
+      '</tbody></table>';
+    el.querySelectorAll(".dismiss-btn").forEach(btn => {
+      btn.addEventListener("click", () => dismissFlag(btn.dataset.id, btn.dataset.flag, btn));
+    });
+  }
+
+  // ── render: recent ────────────────────────────────────────────────────────
+  function renderRecent() {
+    const items = DATA.agreements.filter(a =>
+      a.added_to_folder_date &&
+      daysBetween(TODAY, a.added_to_folder_date) <= RULES.recently_added_within_days
+    );
+    document.getElementById("recent-count").textContent = items.length;
+    const el = document.getElementById("recent-list");
+    if (!items.length) { el.innerHTML = emptyState("No new agreements detected in the last 7 days."); return; }
+    items.sort((a, b) => new Date(b.added_to_folder_date) - new Date(a.added_to_folder_date));
+    el.innerHTML =
+      '<table><thead><tr><th>Added</th><th>Agreement</th><th>Category</th><th>Counterparty</th><th>File</th></tr></thead><tbody>' +
+      items.map(a =>
+        '<tr><td>' + ISO(a.added_to_folder_date) + '</td>' +
+        '<td><strong>' + (a.title || a.file_name || a.id) + '</strong></td>' +
+        '<td>' + catTag(a.category) + '</td>' +
+        '<td>' + counterparties(a) + '</td>' +
+        '<td>' + fileLink(a) + '</td></tr>'
+      ).join("") +
+      '</tbody></table>';
+  }
+
+  // ── render: full index ────────────────────────────────────────────────────
+  function renderIndex() {
+    const catSel    = document.getElementById("filter-category");
+    const search    = document.getElementById("filter-search");
+    const statusSel = document.getElementById("filter-status");
+
+    const cats = Array.from(new Set(DATA.agreements.map(a => a.category).filter(Boolean))).sort();
+    cats.forEach(c => {
+      const o = document.createElement("option");
+      o.value = c;
+      o.textContent = (DATA.categories[c] && DATA.categories[c].label) || c;
+      catSel.appendChild(o);
+    });
+
+    const apply = () => {
+      const q   = search.value.toLowerCase().trim();
+      const cat = catSel.value;
+      const st  = statusSel.value;
+      const items = DATA.agreements.filter(a => {
+        if (cat && a.category !== cat) return false;
+        if (st  && (a.status || "active") !== st) return false;
+        if (q) {
+          const blob = [a.title, a.file_name, a.id]
+            .concat(a.counterparties     || [])
+            .concat(a.self_parties       || [])
+            .concat(a.related_entities   || [])
+            .filter(Boolean).join(" ").toLowerCase();
+          if (!blob.includes(q)) return false;
+        }
+        return true;
+      });
+      document.getElementById("idx-count").textContent = items.length;
+      const el = document.getElementById("index-table");
+      if (!items.length) { el.innerHTML = emptyState("No agreements match these filters."); return; }
+      el.innerHTML =
+        '<table><thead><tr><th>Title</th><th>Category</th><th>Counterparty / Entity</th><th>Signed</th><th>Expires</th><th>Status</th><th>Flags</th><th>File</th></tr></thead><tbody>' +
+        items.map(a => {
+          const ent = (a.related_entities && a.related_entities.length)
+            ? ' <span style="color:#6b7280;font-size:11px;">[' + a.related_entities.join(", ") + ']</span>' : "";
+          const statusCls = (a.status === "expired" || a.status === "terminated") ? "badge-muted" : "badge-ok";
+          return '<tr>' +
+            '<td><strong>' + (a.title || a.file_name || a.id) + '</strong>' +
+            (a.subcategory ? ' <span style="color:#6b7280;font-size:11px;">(' + a.subcategory + ')</span>' : '') +
+            driveLink(a) +
+            '</td>' +
+            '<td>' + catTag(a.category) + '</td>' +
+            '<td>' + counterparties(a) + ent + '</td>' +
+            '<td>' + ISO(a.signed_date) + '</td>' +
+            '<td>' + ISO(a.expiry_date) + '</td>' +
+            '<td><span class="badge ' + statusCls + '">' + (a.status || "active") + '</span></td>' +
+            '<td>' + (a._flags.length
+              ? '<span class="badge badge-warn">' + a._flags.length + ' flag' + (a._flags.length > 1 ? 's' : '') + '</span>'
+              : '<span class="badge badge-muted">—</span>') + '</td>' +
+            '<td>' + fileLink(a) + '</td>' +
+            '</tr>';
+        }).join("") +
+        '</tbody></table>';
+    };
+
+    search.addEventListener("input",  apply);
+    catSel.addEventListener("change", apply);
+    statusSel.addEventListener("change", apply);
+    apply();
+  }
+
+  // ── render: payments & key dates ─────────────────────────────────────────
+  function renderPayments() {
+    const rows = [];
+    DATA.agreements.forEach(a => {
+      (a.payment_schedule || []).forEach(p => {
+        if (!p.due_date) return;
+        rows.push({ date: p.due_date, type: p.paid ? "Payment (paid)" : "Payment due",
+          amount: (p.amount || "") + " " + (a.currency || ""),
+          agreement: a.title || a.file_name || a.id, category: a.category, description: p.description || "" });
+      });
+      if (a.expiry_date)
+        rows.push({ date: a.expiry_date, type: "Expiry / term end", amount: "—",
+          agreement: a.title || a.file_name || a.id, category: a.category, description: "Agreement term ends" });
+      if (a.renewal_notice_deadline)
+        rows.push({ date: a.renewal_notice_deadline, type: "Renewal notice deadline", amount: "—",
+          agreement: a.title || a.file_name || a.id, category: a.category, description: "Last day to give renewal/termination notice" });
+      if (a.maturity_date)
+        rows.push({ date: a.maturity_date, type: "Loan maturity", amount: (a.principal || "") + " " + (a.currency || ""),
+          agreement: a.title || a.file_name || a.id, category: a.category, description: "Principal repayment due" });
+      if (a.long_stop_date)
+        rows.push({ date: a.long_stop_date, type: "Long-stop date", amount: "—",
+          agreement: a.title || a.file_name || a.id, category: a.category, description: "Long-stop / drop-dead date" });
+      if (a.closing_date)
+        rows.push({ date: a.closing_date, type: "Closing", amount: (a.transaction_value || "") + " " + (a.currency || ""),
+          agreement: a.title || a.file_name || a.id, category: a.category, description: "Transaction closing" });
+    });
+    rows.sort((x, y) => new Date(x.date) - new Date(y.date));
+    const el = document.getElementById("payments-table");
+    if (!rows.length) { el.innerHTML = emptyState("No payment schedules or key dates recorded yet."); return; }
+    el.innerHTML =
+      '<table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Agreement</th><th>Category</th><th>Description</th></tr></thead><tbody>' +
+      rows.map(r => {
+        const d   = daysBetween(r.date, TODAY);
+        const cls = d < 0 ? "badge-muted" : d <= 30 ? "badge-urgent" : d <= 90 ? "badge-warn" : "badge-info";
+        const ind = d < 0 ? (-d) + "d ago" : "in " + d + "d";
+        return '<tr><td>' + r.date + ' <span class="badge ' + cls + '">' + ind + '</span></td>' +
+          '<td>' + r.type + '</td><td>' + r.amount.trim() + '</td>' +
+          '<td>' + r.agreement + '</td><td>' + catTag(r.category) + '</td>' +
+          '<td>' + r.description + '</td></tr>';
+      }).join("") +
+      '</tbody></table>';
+  }
+
+  // ── render: obligations ───────────────────────────────────────────────────
+  function renderObligations() {
+    const rows = [];
+    DATA.agreements.forEach(a => {
+      if (a.non_compete_end_date || a.non_compete_period_months) {
+        const details = (
+          (a.non_compete_period_months ? a.non_compete_period_months + " months" : "") +
+          " " +
+          (a.non_compete_geo ? "in " + a.non_compete_geo : "")
+        ).trim() || "—";
+        rows.push({ obligation: "Non-compete", agreement: a.title || a.file_name || a.id,
+          category: a.category, details, until: a.non_compete_end_date || "—" });
+      }
+      if (a.non_solicit_period_months)
+        rows.push({ obligation: "Non-solicitation", agreement: a.title || a.file_name || a.id,
+          category: a.category, details: a.non_solicit_period_months + " months", until: "—" });
+      if (a.confidentiality_period_years || a.survives_termination_years) {
+        const y = a.confidentiality_period_years || a.survives_termination_years;
+        rows.push({ obligation: "Confidentiality", agreement: a.title || a.file_name || a.id,
+          category: a.category,
+          details: y + " years" + (a.mutual === false ? " (one-way)" : " (mutual)"),
+          until: "—" });
+      }
+      if (a.ip_assignment)
+        rows.push({ obligation: "IP assignment", agreement: a.title || a.file_name || a.id,
+          category: a.category,
+          details: typeof a.ip_assignment === "string" ? a.ip_assignment : "Yes",
+          until: "—" });
+    });
+    const el = document.getElementById("obligations-table");
+    if (!rows.length) {
+      el.innerHTML = emptyState("No continuing obligations recorded yet. Add fields like <code>non_compete_period_months</code>, <code>confidentiality_period_years</code> etc. to surface them here.");
+      return;
+    }
+    el.innerHTML =
+      '<table><thead><tr><th>Obligation</th><th>Agreement</th><th>Category</th><th>Details</th><th>Ends</th></tr></thead><tbody>' +
+      rows.map(r =>
+        '<tr><td><strong>' + r.obligation + '</strong></td><td>' + r.agreement + '</td><td>' +
+        catTag(r.category) + '</td><td>' + r.details + '</td><td>' + r.until + '</td></tr>'
+      ).join("") +
+      '</tbody></table>';
+  }
+
+  // ── render all ────────────────────────────────────────────────────────────
+  renderAttention();
+  renderRecent();
+  renderIndex();
+  renderPayments();
+  renderObligations();
+
+  // ── nav tabs ──────────────────────────────────────────────────────────────
+  document.querySelectorAll(".nav-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("view-" + btn.dataset.view).classList.add("active");
+    });
+  });
+
+})();
+</script>
+
+</body>
+</html>

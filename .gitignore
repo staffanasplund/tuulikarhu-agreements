@@ -1,0 +1,17 @@
+# Google credentials — never commit these
+credentials.json
+token.json
+service_account.json
+gdrive_config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
