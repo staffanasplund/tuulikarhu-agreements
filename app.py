@@ -191,6 +191,33 @@ def update_agreement():
     return jsonify({"ok": True})
 
 
+# ── health / diagnostics (no auth) ───────────────────────────────────────────
+@app.route("/healthz")
+def healthz():
+    diag = {
+        "db_file_id_set":  bool(_db_file_id),
+        "folder_id_set":   bool(_folder_id),
+        "sa_json_set":     bool(os.environ.get("SERVICE_ACCOUNT_JSON")),
+        "drive_ok":        False,
+        "agreement_count": None,
+        "error":           None,
+    }
+    try:
+        svc = get_service()
+        diag["drive_ok"] = True
+        buf = io.BytesIO()
+        req = svc.files().get_media(fileId=_db_file_id, supportsAllDrives=True)
+        dl  = MediaIoBaseDownload(buf, req)
+        done = False
+        while not done:
+            _, done = dl.next_chunk()
+        data = json.loads(buf.getvalue().decode("utf-8"))
+        diag["agreement_count"] = len(data.get("agreements", []))
+    except Exception as e:
+        diag["error"] = str(e)
+    return jsonify(diag)
+
+
 # ── launch ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     _load_config_from_file()
