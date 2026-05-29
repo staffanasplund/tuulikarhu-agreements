@@ -129,7 +129,7 @@
           <li><strong>Dismiss a flag</strong> — click the <em>dismiss</em> button next to any flag in the "Needs attention" panel. The dismissal is saved to Google Drive.</li>
           <li><strong>Edit the JSON directly</strong> — open <code>agreements_database.json</code> in Google Drive and edit the relevant entry. Refresh the page to see the change.</li>
         </ol>
-        <p style="margin-top:10px;"><strong>Auto-scan:</strong> run <code>python build_database.py</code> again at any time to re-scan all files and refresh the database.</p>
+        <p style="margin-top:10px;"><strong>Adding new agreements:</strong> upload new PDFs to the relevant zip archive in Google Drive, then run <code>python build_database.py</code> locally to re-scan and refresh the database.</p>
       </div>
     </div>
   </div>
@@ -175,16 +175,16 @@
   <div class="view" id="view-help">
     <div class="panel">
       <h2>How this app works</h2>
-      <p style="font-size:13px;">Data lives in <code>agreements_database.json</code> on Google Drive. The dashboard reads it live on every page load — no rebuild needed. Run <code>python app.py</code> (or double-click <code>run.bat</code>) to start the server.</p>
+      <p style="font-size:13px;">The dashboard is hosted on Railway and accessible from any browser. Data lives in <code>agreements_database.json</code> on Google Drive — read on every page load, no rebuild needed. Access is protected by username and password.</p>
 
       <h3 style="font-size:14px;">Adding an agreement</h3>
-      <p style="font-size:13px;">Upload the signed PDF/DOCX to the matching zip archive or a subfolder on Google Drive, then run <code>python build_database.py</code> to re-extract and refresh the database.</p>
+      <p style="font-size:13px;">Upload the signed PDF to the matching zip archive in Google Drive, then run <code>python build_database.py</code> locally to re-scan and push the updated database back to Google Drive. Refresh the dashboard to see the change.</p>
 
       <h3 style="font-size:14px;">Correcting metadata</h3>
       <p style="font-size:13px;">Tell Claude: <em>"In the TUULIKARHU database, change the expiry date of &lt;agreement&gt; to 2027-12-31"</em>. Logged in <code>manual_corrections_log</code>. Then refresh.</p>
 
-      <h3 style="font-size:14px;">Sharing</h3>
-      <p style="font-size:13px;">Anyone on the same machine (or same LAN if you run <code>app.run(host="0.0.0.0")</code>) can open the dashboard in a browser. The Google Drive JSON file remains the single source of truth.</p>
+      <h3 style="font-size:14px;">Access</h3>
+      <p style="font-size:13px;">Share the Railway URL with anyone who should have access. Credentials are managed via Railway environment variables (<code>DASHBOARD_USERNAME</code> / <code>DASHBOARD_PASSWORD</code>). The Google Drive JSON remains the single source of truth.</p>
 
       <h3 style="font-size:14px;">Attention rules</h3>
       <ul style="font-size:13px;">
@@ -199,10 +199,12 @@
       </ul>
 
       <h3 style="font-size:14px;">API</h3>
-      <p style="font-size:13px;">
-        <code>GET /api/data</code> — returns the full <code>agreements_database.json</code><br>
+      <p style="font-size:13px;">All endpoints require Basic Auth (same credentials as the dashboard).<br>
+        <code>GET /api/data</code> — full <code>agreements_database.json</code><br>
+        <code>GET /api/file/&lt;id&gt;</code> — serves the PDF for an agreement inline<br>
         <code>POST /api/dismiss</code> — body: <code>{"agreement_id":"…","flag_type":"expired"}</code><br>
-        <code>POST /api/update</code> — body: <code>{"agreement_id":"…","field":"status","value":"terminated"}</code>
+        <code>POST /api/update</code> — body: <code>{"agreement_id":"…","field":"status","value":"terminated"}</code><br>
+        <code>GET /healthz</code> — unauthenticated diagnostic endpoint (Drive connectivity check)
       </p>
     </div>
   </div>
