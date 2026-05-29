@@ -31,8 +31,8 @@ BASE_DIR = Path(__file__).parent
 app = Flask(__name__, template_folder="templates")
 
 _service    = None
-_db_file_id = os.environ.get("DB_FILE_ID", "")
-_folder_id  = os.environ.get("FOLDER_ID", "")
+_db_file_id = os.environ.get("DB_FILE_ID", "").strip()
+_folder_id  = os.environ.get("FOLDER_ID", "").strip()
 
 USERNAME = os.environ.get("DASHBOARD_USERNAME", "admin")
 PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "changeme")
