@@ -194,22 +194,23 @@ def update_agreement():
 
 
 # ── file serving ─────────────────────────────────────────────────────────────
-_zip_cache: dict = {}   # zip_drive_id -> bytes  (simple in-process cache)
-MAX_ZIP_CACHE = 5       # keep at most 5 ZIPs in memory at once
+_drive_cache: dict = {}  # drive_file_id -> bytes  (covers both ZIPs and direct files)
+MAX_CACHE_ENTRIES = 8
 
 
-def _get_zip_bytes(zip_drive_id: str) -> bytes:
-    if zip_drive_id not in _zip_cache:
+def _get_drive_bytes(file_id: str) -> bytes:
+    """Download any Drive file by ID, with a small in-process LRU-ish cache."""
+    if file_id not in _drive_cache:
         buf = io.BytesIO()
-        req = get_service().files().get_media(fileId=zip_drive_id, supportsAllDrives=True)
+        req = get_service().files().get_media(fileId=file_id, supportsAllDrives=True)
         dl  = MediaIoBaseDownload(buf, req)
         done = False
         while not done:
             _, done = dl.next_chunk()
-        if len(_zip_cache) >= MAX_ZIP_CACHE:
-            _zip_cache.pop(next(iter(_zip_cache)))   # evict oldest
-        _zip_cache[zip_drive_id] = buf.getvalue()
-    return _zip_cache[zip_drive_id]
+        if len(_drive_cache) >= MAX_CACHE_ENTRIES:
+            _drive_cache.pop(next(iter(_drive_cache)))
+        _drive_cache[file_id] = buf.getvalue()
+    return _drive_cache[file_id]
 
 
 @app.route("/api/file/<agreement_id>")
@@ -220,9 +221,25 @@ def serve_file(agreement_id):
     if not agr:
         return jsonify({"error": "Agreement not found"}), 404
 
-    file_path     = agr.get("file_path", "")
-    zip_internal  = agr.get("zip_internal_path", "")
-    file_name     = agr.get("file_name", "document.pdf")
+    file_name = agr.get("file_name", "document.pdf")
+    mime      = "application/pdf" if file_name.lower().endswith(".pdf") else "application/octet-stream"
+
+    # ── Case 1: direct Drive file (from 99 INBOX) ─────────────────
+    gdrive_file_id = agr.get("gdrive_file_id", "")
+    if gdrive_file_id:
+        try:
+            pdf_bytes = _get_drive_bytes(gdrive_file_id)
+        except Exception as e:
+            return jsonify({"error": f"Could not download file: {e}"}), 500
+        return Response(
+            pdf_bytes,
+            mimetype=mime,
+            headers={"Content-Disposition": f'inline; filename="{file_name}"'},
+        )
+
+    # ── Case 2: file inside a ZIP ──────────────────────────────────
+    file_path    = agr.get("file_path", "")
+    zip_internal = agr.get("zip_internal_path", "")
 
     if not file_path or not zip_internal:
         return jsonify({"error": "No file linked to this agreement"}), 404
@@ -233,18 +250,16 @@ def serve_file(agreement_id):
     zip_drive_id = m.group(1)
 
     try:
-        zip_bytes = _get_zip_bytes(zip_drive_id)
+        zip_bytes = _get_drive_bytes(zip_drive_id)
     except Exception as e:
         return jsonify({"error": f"Could not download ZIP: {e}"}), 500
 
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            # Try exact internal path first
             names = zf.namelist()
             if zip_internal in names:
                 pdf_bytes = zf.read(zip_internal)
             else:
-                # Fall back: match by file name (handles encoding edge cases)
                 matches = [n for n in names if n.split("/")[-1] == file_name]
                 if not matches:
                     return jsonify({"error": f"File not found in ZIP: {file_name}"}), 404
@@ -252,7 +267,6 @@ def serve_file(agreement_id):
     except Exception as e:
         return jsonify({"error": f"Could not read ZIP: {e}"}), 500
 
-    mime = "application/pdf" if file_name.lower().endswith(".pdf") else "application/octet-stream"
     return Response(
         pdf_bytes,
         mimetype=mime,

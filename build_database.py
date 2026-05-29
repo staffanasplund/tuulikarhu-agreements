@@ -44,6 +44,7 @@ import anthropic
 
 GDRIVE_FOLDER_ID = "1xgaXpvC2R2BWdLBjg1mUTd9OY9s5UOY_"
 DATABASE_FILENAME = "agreements_database.json"
+INBOX_FOLDER_NAME = "99 INBOX"
 GDRIVE_CONFIG_PATH = Path(__file__).parent / "gdrive_config.json"
 TOKEN_PATH = Path(__file__).parent / "token.json"
 CREDENTIALS_PATH = Path(__file__).parent / "credentials.json"
@@ -213,6 +214,7 @@ def blank_agreement() -> dict[str, Any]:
         "summary": "",
         "key_obligations": [],
         "notes": "",
+        "gdrive_file_id": "",
         "added_to_folder_date": today_str(),
     }
 
@@ -273,6 +275,124 @@ def list_files_in_folder(service, folder_id: str) -> list[dict]:
         if not page_token:
             break
     return results
+
+
+def list_items_in_folder(service, folder_id: str) -> list[dict]:
+    """Return all items (files AND subfolders) directly inside a Drive folder."""
+    results = []
+    page_token = None
+    while True:
+        resp = (
+            service.files()
+            .list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                spaces="drive",
+                fields="nextPageToken, files(id, name, mimeType, createdTime, modifiedTime)",
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
+            .execute()
+        )
+        results.extend(resp.get("files", []))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return results
+
+
+def process_inbox_folder(
+    service,
+    inbox_folder_id: str,
+    claude_client: anthropic.Anthropic,
+) -> list[dict]:
+    """
+    Scan the 99 INBOX folder and return agreement dicts for each PDF found.
+
+    Supported structures:
+        99 INBOX/ContractName/file.pdf   — subfolder per contract (preferred)
+        99 INBOX/file.pdf                — single file directly in INBOX
+    """
+    agreements: list[dict] = []
+    items = list_items_in_folder(service, inbox_folder_id)
+
+    FOLDER_MIME = "application/vnd.google-apps.folder"
+
+    for item in sorted(items, key=lambda x: x["name"]):
+        if item["mimeType"] == FOLDER_MIME:
+            # Subfolder = one contract
+            sub_items = list_items_in_folder(service, item["id"])
+            pdfs = [f for f in sub_items if f["name"].lower().endswith(".pdf")]
+            if not pdfs:
+                continue
+            main_pdf   = next((f for f in pdfs if not is_appendix(f["name"])), pdfs[0])
+            appendices = [f for f in pdfs if f["id"] != main_pdf["id"]]
+            title      = strip_zefort_id(item["name"])
+            category   = category_from_folder_name(title) or "Other"
+            agr = _make_inbox_agreement(
+                service, main_pdf, title, category, appendices, claude_client
+            )
+            if agr:
+                agreements.append(agr)
+
+        elif item["name"].lower().endswith(".pdf"):
+            # Single PDF directly in INBOX root
+            title    = strip_zefort_id(Path(item["name"]).stem)
+            category = category_from_folder_name(title) or "Other"
+            agr = _make_inbox_agreement(
+                service, item, title, category, [], claude_client
+            )
+            if agr:
+                agreements.append(agr)
+
+    print(f"  [INBOX] {len(agreements)} agreement(s) found")
+    return agreements
+
+
+def _make_inbox_agreement(
+    service,
+    file_meta: dict,
+    title: str,
+    category: str,
+    appendices: list[dict],
+    claude_client: anthropic.Anthropic,
+) -> dict | None:
+    """Build one agreement dict from a direct Google Drive PDF."""
+    print(f"    [INBOX] {title}")
+    print(f"            file : {file_meta['name']}")
+
+    try:
+        pdf_bytes = download_file(service, file_meta["id"])
+        pdf_text  = extract_pdf_text(pdf_bytes)
+    except Exception as exc:
+        print(f"    [PDF] Error reading {file_meta['name']}: {exc}")
+        pdf_text = ""
+
+    agr = blank_agreement()
+    agr["title"]            = title
+    agr["category"]         = category
+    agr["file_name"]        = file_meta["name"]
+    agr["file_path"]        = f"https://drive.google.com/file/d/{file_meta['id']}/view"
+    agr["gdrive_file_id"]   = file_meta["id"]
+    agr["zip_internal_path"] = ""
+    agr["source_zip"]       = INBOX_FOLDER_NAME
+    agr["added_to_folder_date"] = (file_meta.get("createdTime") or today_str())[:10]
+    agr["appendices"] = [
+        {"file_name": a["name"], "gdrive_file_id": a["id"]}
+        for a in appendices
+    ]
+
+    if pdf_text:
+        print(f"            calling Claude …")
+        meta = extract_metadata_via_claude(claude_client, pdf_text, title, category)
+        _apply_claude_metadata(agr, meta)
+    else:
+        print(f"            [skip Claude – no text extracted]")
+
+    agr["all_parties"] = sorted(
+        set(agr["self_parties"]) | set(agr["counterparties"])
+    )
+    return agr
 
 
 def download_file(service, file_id: str) -> bytes:
@@ -620,7 +740,11 @@ def _apply_claude_metadata(agr: dict[str, Any], meta: dict[str, Any]) -> None:
 # Database builder
 # =============================================================================
 
-def build_database_json(agreements: list[dict[str, Any]]) -> dict[str, Any]:
+def build_database_json(
+    agreements: list[dict[str, Any]],
+    dismissed_flags: list | None = None,
+    manual_corrections_log: list | None = None,
+) -> dict[str, Any]:
     return {
         "metadata": {
             "last_updated": now_iso(),
@@ -630,8 +754,8 @@ def build_database_json(agreements: list[dict[str, Any]]) -> dict[str, Any]:
         "agreements": agreements,
         "categories": CATEGORIES,
         "attention_rules": ATTENTION_RULES,
-        "dismissed_flags": [],
-        "manual_corrections_log": [],
+        "dismissed_flags": dismissed_flags or [],
+        "manual_corrections_log": manual_corrections_log or [],
     }
 
 
@@ -676,47 +800,88 @@ def main() -> None:
     print("       OK")
 
     # ── List Drive folder ─────────────────────────────────────────
-    print(f"\n[3/5] Listing files in Drive folder {GDRIVE_FOLDER_ID} …")
-    files = list_files_in_folder(service, GDRIVE_FOLDER_ID)
-    zip_files = [
-        f for f in files
-        if f["name"].lower().endswith(".zip")
-    ]
-    print(f"       Found {len(zip_files)} zip file(s):")
+    print(f"\n[3/6] Listing files in Drive folder {GDRIVE_FOLDER_ID} …")
+    all_items = list_items_in_folder(service, GDRIVE_FOLDER_ID)
+    zip_files   = [f for f in all_items if f["name"].lower().endswith(".zip")]
+    inbox_item  = next((f for f in all_items if f["name"] == INBOX_FOLDER_NAME), None)
+    print(f"       Found {len(zip_files)} zip file(s)" +
+          (f" + INBOX folder" if inbox_item else " (no INBOX folder found)"))
     for zf in zip_files:
         print(f"         • {zf['name']} ({zf['id']})")
 
     # ── Process zips ──────────────────────────────────────────────
-    print(f"\n[4/5] Processing zip files …")
+    print(f"\n[4/6] Processing zip files …")
     all_agreements: list[dict[str, Any]] = []
 
     for zf_meta in zip_files:
         zip_name = zf_meta["name"]
-        zip_id = zf_meta["id"]
+        zip_id   = zf_meta["id"]
         print(f"\n  Downloading {zip_name} …")
         zip_bytes = download_file(service, zip_id)
         print(f"  Downloaded {len(zip_bytes):,} bytes")
-
         agreements = parse_zip(zip_bytes, zip_name, zip_id, claude_client)
         print(f"  → {len(agreements)} agreement(s) extracted from {zip_name}")
         all_agreements.extend(agreements)
 
+    # ── Process INBOX ─────────────────────────────────────────────
+    print(f"\n[5/6] Processing {INBOX_FOLDER_NAME} …")
+    if inbox_item:
+        inbox_agreements = process_inbox_folder(service, inbox_item["id"], claude_client)
+        all_agreements.extend(inbox_agreements)
+    else:
+        print(f"  Skipped (folder '{INBOX_FOLDER_NAME}' not found in Drive)")
+
     print(f"\n  Total agreements processed: {len(all_agreements)}")
 
-    # ── Write database ────────────────────────────────────────────
-    print(f"\n[5/5] Writing {DATABASE_FILENAME} to Drive folder …")
-    database = build_database_json(all_agreements)
-
+    # ── Preserve IDs and user data from existing database ─────────
     config = load_config()
     existing_db_id: str | None = config.get("database_file_id")
+    existing_dismissed: list = []
+    existing_corrections: list = []
 
-    # Validate existing file still exists
     if existing_db_id:
         try:
-            service.files().get(fileId=existing_db_id, fields="id").execute()
-        except Exception:
-            print("  Existing database file not found – will create a new one.")
+            service.files().get(fileId=existing_db_id, fields="id", supportsAllDrives=True).execute()
+            print(f"\n  Loading existing database to preserve IDs and user data …")
+            existing_bytes = download_file(service, existing_db_id)
+            existing_db    = json.loads(existing_bytes.decode("utf-8"))
+            existing_dismissed   = existing_db.get("dismissed_flags", [])
+            existing_corrections = existing_db.get("manual_corrections_log", [])
+
+            # Build lookup: stable key → existing agreement
+            existing_map: dict[str, dict] = {}
+            for a in existing_db.get("agreements", []):
+                if a.get("gdrive_file_id"):
+                    existing_map[("drive", a["gdrive_file_id"])] = a
+                elif a.get("source_zip") and a.get("zip_internal_path"):
+                    existing_map[("zip", a["source_zip"], a["zip_internal_path"])] = a
+
+            # Merge: reuse IDs and preserve user-edited notes
+            for agr in all_agreements:
+                if agr.get("gdrive_file_id"):
+                    key = ("drive", agr["gdrive_file_id"])
+                elif agr.get("source_zip") and agr.get("zip_internal_path"):
+                    key = ("zip", agr["source_zip"], agr["zip_internal_path"])
+                else:
+                    continue
+                if key in existing_map:
+                    prev = existing_map[key]
+                    agr["id"] = prev["id"]
+                    if prev.get("notes"):
+                        agr["notes"] = prev["notes"]
+                    if prev.get("status") and prev["status"] != "active":
+                        agr["status"] = prev["status"]
+
+            print(f"  Preserved {len(existing_map)} existing IDs")
+            print(f"  Kept {len(existing_dismissed)} dismissed flag(s), "
+                  f"{len(existing_corrections)} correction(s)")
+        except Exception as exc:
+            print(f"  Could not load existing database ({exc}) – starting fresh")
             existing_db_id = None
+
+    # ── Write database ────────────────────────────────────────────
+    print(f"\n[6/6] Writing {DATABASE_FILENAME} to Drive folder …")
+    database = build_database_json(all_agreements, existing_dismissed, existing_corrections)
 
     new_db_id = upload_or_update_json(
         service,
