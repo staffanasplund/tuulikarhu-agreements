@@ -224,12 +224,32 @@ def blank_agreement() -> dict[str, Any]:
 # =============================================================================
 
 def get_drive_service():
-    """Authenticate and return a Google Drive API service object."""
-    creds: Credentials | None = None
+    """Authenticate and return a Google Drive API service object.
 
+    Priority:
+      1. SERVICE_ACCOUNT_JSON env var  (server / Railway)
+      2. service_account.json file     (local, preferred)
+      3. Desktop OAuth via credentials.json / token.json  (legacy local)
+    """
+    from google.oauth2 import service_account as _sa
+
+    # 1. Service account via env var
+    sa_json = os.environ.get("SERVICE_ACCOUNT_JSON")
+    if sa_json:
+        info  = json.loads(sa_json)
+        creds = _sa.Credentials.from_service_account_info(info, scopes=SCOPES)
+        return build("drive", "v3", credentials=creds)
+
+    # 2. Service account file
+    sa_file = Path(__file__).parent / "service_account.json"
+    if sa_file.exists():
+        creds = _sa.Credentials.from_service_account_file(str(sa_file), scopes=SCOPES)
+        return build("drive", "v3", credentials=creds)
+
+    # 3. Legacy Desktop OAuth (local only)
+    creds: Credentials | None = None
     if TOKEN_PATH.exists():
         creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
-
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             print("  [Auth] Refreshing access token …")
@@ -241,16 +261,12 @@ def get_drive_service():
                     "Download it from Google Cloud Console → APIs & Services → Credentials."
                 )
             print("  [Auth] Opening browser for OAuth2 login …")
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(CREDENTIALS_PATH), SCOPES
-            )
+            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
             creds = flow.run_local_server(port=0)
-
         TOKEN_PATH.write_text(creds.to_json(), encoding="utf-8")
         print(f"  [Auth] Token saved to {TOKEN_PATH}")
 
-    service = build("drive", "v3", credentials=creds)
-    return service
+    return build("drive", "v3", credentials=creds)
 
 
 def list_files_in_folder(service, folder_id: str) -> list[dict]:
@@ -776,87 +792,63 @@ def save_config(config: dict[str, Any]) -> None:
 
 
 # =============================================================================
-# Entry point
+# Core rebuild (callable from CLI or server)
 # =============================================================================
 
-def main() -> None:
-    print("=" * 60)
-    print("Tuulikarhu Agreements Database Builder")
-    print("=" * 60)
+def run_rebuild(service, claude_client, log=print) -> dict[str, Any]:
+    """
+    Scan Drive ZIPs + INBOX, extract metadata, write agreements_database.json.
+    Returns {"agreement_count": int, "db_file_id": str}.
 
-    # ── Auth ──────────────────────────────────────────────────────
-    print("\n[1/5] Authenticating with Google Drive …")
-    service = get_drive_service()
-    print("       OK")
-
-    # ── Claude client ─────────────────────────────────────────────
-    print("\n[2/5] Initialising Claude client …")
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise EnvironmentError(
-            "ANTHROPIC_API_KEY environment variable is not set."
-        )
-    claude_client = anthropic.Anthropic(api_key=api_key)
-    print("       OK")
+    `log` is a callable used for progress messages (default: print).
+    On the server, pass a function that appends to a list.
+    """
 
     # ── List Drive folder ─────────────────────────────────────────
-    print(f"\n[3/6] Listing files in Drive folder {GDRIVE_FOLDER_ID} …")
-    all_items = list_items_in_folder(service, GDRIVE_FOLDER_ID)
-    zip_files   = [f for f in all_items if f["name"].lower().endswith(".zip")]
-    inbox_item  = next((f for f in all_items if f["name"] == INBOX_FOLDER_NAME), None)
-    print(f"       Found {len(zip_files)} zip file(s)" +
-          (f" + INBOX folder" if inbox_item else " (no INBOX folder found)"))
-    for zf in zip_files:
-        print(f"         • {zf['name']} ({zf['id']})")
+    log(f"Listing Drive folder …")
+    all_items  = list_items_in_folder(service, GDRIVE_FOLDER_ID)
+    zip_files  = [f for f in all_items if f["name"].lower().endswith(".zip")]
+    inbox_item = next((f for f in all_items if f["name"] == INBOX_FOLDER_NAME), None)
+    log(f"Found {len(zip_files)} zip(s)" + (" + INBOX" if inbox_item else ""))
 
-    # ── Process zips ──────────────────────────────────────────────
-    print(f"\n[4/6] Processing zip files …")
+    # ── Process ZIPs ──────────────────────────────────────────────
     all_agreements: list[dict[str, Any]] = []
-
     for zf_meta in zip_files:
-        zip_name = zf_meta["name"]
-        zip_id   = zf_meta["id"]
-        print(f"\n  Downloading {zip_name} …")
-        zip_bytes = download_file(service, zip_id)
-        print(f"  Downloaded {len(zip_bytes):,} bytes")
-        agreements = parse_zip(zip_bytes, zip_name, zip_id, claude_client)
-        print(f"  → {len(agreements)} agreement(s) extracted from {zip_name}")
+        log(f"Processing {zf_meta['name']} …")
+        zip_bytes  = download_file(service, zf_meta["id"])
+        agreements = parse_zip(zip_bytes, zf_meta["name"], zf_meta["id"], claude_client)
+        log(f"  → {len(agreements)} agreement(s)")
         all_agreements.extend(agreements)
 
     # ── Process INBOX ─────────────────────────────────────────────
-    print(f"\n[5/6] Processing {INBOX_FOLDER_NAME} …")
     if inbox_item:
+        log(f"Processing {INBOX_FOLDER_NAME} …")
         inbox_agreements = process_inbox_folder(service, inbox_item["id"], claude_client)
         all_agreements.extend(inbox_agreements)
-    else:
-        print(f"  Skipped (folder '{INBOX_FOLDER_NAME}' not found in Drive)")
 
-    print(f"\n  Total agreements processed: {len(all_agreements)}")
+    log(f"Total: {len(all_agreements)} agreements")
 
-    # ── Preserve IDs and user data from existing database ─────────
-    config = load_config()
-    existing_db_id: str | None = config.get("database_file_id")
-    existing_dismissed: list = []
+    # ── Preserve IDs and user data ────────────────────────────────
+    config         = load_config()
+    existing_db_id = config.get("database_file_id")
+    existing_dismissed:   list = []
     existing_corrections: list = []
 
     if existing_db_id:
         try:
             service.files().get(fileId=existing_db_id, fields="id", supportsAllDrives=True).execute()
-            print(f"\n  Loading existing database to preserve IDs and user data …")
-            existing_bytes = download_file(service, existing_db_id)
-            existing_db    = json.loads(existing_bytes.decode("utf-8"))
+            log("Loading existing database to preserve IDs …")
+            existing_db  = json.loads(download_file(service, existing_db_id).decode("utf-8"))
             existing_dismissed   = existing_db.get("dismissed_flags", [])
             existing_corrections = existing_db.get("manual_corrections_log", [])
 
-            # Build lookup: stable key → existing agreement
-            existing_map: dict[str, dict] = {}
+            existing_map: dict = {}
             for a in existing_db.get("agreements", []):
                 if a.get("gdrive_file_id"):
                     existing_map[("drive", a["gdrive_file_id"])] = a
                 elif a.get("source_zip") and a.get("zip_internal_path"):
                     existing_map[("zip", a["source_zip"], a["zip_internal_path"])] = a
 
-            # Merge: reuse IDs and preserve user-edited notes
             for agr in all_agreements:
                 if agr.get("gdrive_file_id"):
                     key = ("drive", agr["gdrive_file_id"])
@@ -872,37 +864,50 @@ def main() -> None:
                     if prev.get("status") and prev["status"] != "active":
                         agr["status"] = prev["status"]
 
-            print(f"  Preserved {len(existing_map)} existing IDs")
-            print(f"  Kept {len(existing_dismissed)} dismissed flag(s), "
-                  f"{len(existing_corrections)} correction(s)")
+            log(f"Preserved {len(existing_map)} IDs, "
+                f"{len(existing_dismissed)} dismissed flag(s), "
+                f"{len(existing_corrections)} correction(s)")
         except Exception as exc:
-            print(f"  Could not load existing database ({exc}) – starting fresh")
+            log(f"Could not load existing database ({exc}) – starting fresh")
             existing_db_id = None
 
     # ── Write database ────────────────────────────────────────────
-    print(f"\n[6/6] Writing {DATABASE_FILENAME} to Drive folder …")
-    database = build_database_json(all_agreements, existing_dismissed, existing_corrections)
-
+    log(f"Writing {DATABASE_FILENAME} to Drive …")
+    database  = build_database_json(all_agreements, existing_dismissed, existing_corrections)
     new_db_id = upload_or_update_json(
-        service,
-        GDRIVE_FOLDER_ID,
-        DATABASE_FILENAME,
-        database,
+        service, GDRIVE_FOLDER_ID, DATABASE_FILENAME, database,
         existing_file_id=existing_db_id,
     )
-    print(f"  Database file ID: {new_db_id}")
-
-    # ── Save local config ─────────────────────────────────────────
-    config["folder_id"] = GDRIVE_FOLDER_ID
+    config["folder_id"]       = GDRIVE_FOLDER_ID
     config["database_file_id"] = new_db_id
     save_config(config)
-    print(f"  Config saved to {GDRIVE_CONFIG_PATH}")
+    log(f"Done — {len(all_agreements)} agreements written (file ID: {new_db_id})")
+    return {"agreement_count": len(all_agreements), "db_file_id": new_db_id}
 
+
+# =============================================================================
+# CLI entry point
+# =============================================================================
+
+def main() -> None:
+    print("=" * 60)
+    print("Tuulikarhu Agreements Database Builder")
+    print("=" * 60)
+
+    print("\n[1/2] Authenticating …")
+    service = get_drive_service()
+    print("       OK")
+
+    print("\n[2/2] Initialising Claude …")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise EnvironmentError("ANTHROPIC_API_KEY environment variable is not set.")
+    claude_client = anthropic.Anthropic(api_key=api_key)
+    print("       OK\n")
+
+    result = run_rebuild(service, claude_client)
     print("\n" + "=" * 60)
-    print(f"Done! {len(all_agreements)} agreements written to {DATABASE_FILENAME}")
-    print(
-        f"View at: https://drive.google.com/file/d/{new_db_id}/view"
-    )
+    print(f"Done! {result['agreement_count']} agreements written.")
     print("=" * 60)
 
 

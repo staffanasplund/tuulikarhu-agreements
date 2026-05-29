@@ -82,6 +82,13 @@
 
   footer { padding: 20px 32px; text-align: center; color: #9ca3af; font-size: 12px; }
 
+  /* ── rebuild ── */
+  .rebuild-btn { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 6px 14px; border-radius: 5px; font-size: 13px; cursor: pointer; font-weight: 500; }
+  .rebuild-btn:hover:not(:disabled) { background: rgba(255,255,255,0.25); }
+  .rebuild-btn:disabled { opacity: 0.6; cursor: default; }
+  #rebuild-status { font-size: 12px; margin-top: 6px; opacity: 0.85; min-height: 16px; }
+  #rebuild-log { background: #0f172a; color: #94a3b8; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; padding: 10px 14px; border-radius: 4px; max-height: 160px; overflow-y: auto; white-space: pre-wrap; margin-top: 8px; display: none; }
+
   @media print {
     nav, .info-box, footer, .filters { display: none; }
     header { background: white !important; color: black !important; }
@@ -95,8 +102,13 @@
 <header>
   <h1>Tuulikarhu Oy — Agreements Dashboard</h1>
   <div class="sub">Tracker for signed agreements, payments due, expirations and obligations.</div>
-  <div class="stats" id="header-stats">
-    <span style="opacity:0.7;">Loading data…</span>
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+    <div class="stats" id="header-stats"><span style="opacity:0.7;">Loading data…</span></div>
+    <div style="text-align:right;">
+      <button class="rebuild-btn" id="rebuild-btn" onclick="startRebuild()">↻ Rebuild database</button>
+      <div id="rebuild-status"></div>
+      <div id="rebuild-log"></div>
+    </div>
   </div>
 </header>
 
@@ -594,6 +606,49 @@
   });
 
 })();
+
+// ── rebuild ───────────────────────────────────────────────────────────────────
+let _rebuildPoll = null;
+
+async function startRebuild() {
+  const btn    = document.getElementById("rebuild-btn");
+  const status = document.getElementById("rebuild-status");
+  const log    = document.getElementById("rebuild-log");
+  btn.disabled = true;
+  status.textContent = "Starting …";
+  log.style.display  = "none";
+  log.textContent    = "";
+
+  try {
+    const r = await fetch("/api/rebuild", { method: "POST" });
+    const d = await r.json();
+    if (!d.ok) { status.textContent = "Error: " + d.error; btn.disabled = false; return; }
+  } catch (e) { status.textContent = "Request failed"; btn.disabled = false; return; }
+
+  status.textContent = "Running — this takes a few minutes …";
+  log.style.display  = "block";
+  _rebuildPoll = setInterval(pollRebuild, 3000);
+}
+
+async function pollRebuild() {
+  const btn    = document.getElementById("rebuild-btn");
+  const status = document.getElementById("rebuild-status");
+  const log    = document.getElementById("rebuild-log");
+  try {
+    const d = await (await fetch("/api/rebuild/status")).json();
+    log.textContent = (d.log || []).join("\n");
+    log.scrollTop   = log.scrollHeight;
+    if (!d.running) {
+      clearInterval(_rebuildPoll);
+      btn.disabled = false;
+      if (d.error) {
+        status.textContent = "✗ Failed: " + d.error;
+      } else {
+        status.textContent = "✓ Done " + (d.finished_at || "") + " — refresh to see new data";
+      }
+    }
+  } catch (e) { /* network glitch, keep polling */ }
+}
 </script>
 
 </body>

@@ -17,6 +17,7 @@ import io
 import json
 import os
 import re
+import threading
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -272,6 +273,62 @@ def serve_file(agreement_id):
         mimetype=mime,
         headers={"Content-Disposition": f'inline; filename="{file_name}"'},
     )
+
+
+# ── database rebuild ─────────────────────────────────────────────────────────
+_rebuild = {"running": False, "log": [], "error": None, "finished_at": None}
+_rebuild_lock = threading.Lock()
+
+
+def _do_rebuild():
+    import anthropic
+    import build_database as bdb
+
+    log_lines = []
+    def _log(msg):
+        log_lines.append(msg)
+        _rebuild["log"] = list(log_lines)   # live update
+
+    try:
+        _log("Authenticating with Google Drive …")
+        service = get_service()
+        _log("OK")
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            raise EnvironmentError("ANTHROPIC_API_KEY environment variable not set")
+        claude_client = anthropic.Anthropic(api_key=api_key)
+        _log("Claude ready")
+
+        result = bdb.run_rebuild(service, claude_client, log=_log)
+        _rebuild["error"]       = None
+        _rebuild["finished_at"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+        _log(f"✓ Rebuild complete — {result['agreement_count']} agreements")
+    except Exception as exc:
+        _rebuild["error"] = str(exc)
+        _log(f"✗ Error: {exc}")
+    finally:
+        _rebuild["running"] = False
+
+
+@app.route("/api/rebuild", methods=["POST"])
+@require_auth
+def trigger_rebuild():
+    with _rebuild_lock:
+        if _rebuild["running"]:
+            return jsonify({"ok": False, "error": "Rebuild already in progress"}), 409
+        _rebuild["running"]     = True
+        _rebuild["log"]         = []
+        _rebuild["error"]       = None
+        _rebuild["finished_at"] = None
+        threading.Thread(target=_do_rebuild, daemon=True).start()
+    return jsonify({"ok": True, "message": "Rebuild started"})
+
+
+@app.route("/api/rebuild/status")
+@require_auth
+def rebuild_status():
+    return jsonify(_rebuild)
 
 
 # ── health / diagnostics (no auth) ───────────────────────────────────────────
