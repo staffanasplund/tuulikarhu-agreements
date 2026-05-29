@@ -16,6 +16,8 @@ import functools
 import io
 import json
 import os
+import re
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -189,6 +191,73 @@ def update_agreement():
     })
     write_db(data)
     return jsonify({"ok": True})
+
+
+# ── file serving ─────────────────────────────────────────────────────────────
+_zip_cache: dict = {}   # zip_drive_id -> bytes  (simple in-process cache)
+MAX_ZIP_CACHE = 5       # keep at most 5 ZIPs in memory at once
+
+
+def _get_zip_bytes(zip_drive_id: str) -> bytes:
+    if zip_drive_id not in _zip_cache:
+        buf = io.BytesIO()
+        req = get_service().files().get_media(fileId=zip_drive_id, supportsAllDrives=True)
+        dl  = MediaIoBaseDownload(buf, req)
+        done = False
+        while not done:
+            _, done = dl.next_chunk()
+        if len(_zip_cache) >= MAX_ZIP_CACHE:
+            _zip_cache.pop(next(iter(_zip_cache)))   # evict oldest
+        _zip_cache[zip_drive_id] = buf.getvalue()
+    return _zip_cache[zip_drive_id]
+
+
+@app.route("/api/file/<agreement_id>")
+@require_auth
+def serve_file(agreement_id):
+    data = read_db()
+    agr  = next((a for a in data.get("agreements", []) if a.get("id") == agreement_id), None)
+    if not agr:
+        return jsonify({"error": "Agreement not found"}), 404
+
+    file_path     = agr.get("file_path", "")
+    zip_internal  = agr.get("zip_internal_path", "")
+    file_name     = agr.get("file_name", "document.pdf")
+
+    if not file_path or not zip_internal:
+        return jsonify({"error": "No file linked to this agreement"}), 404
+
+    m = re.search(r"/file/d/([^/]+)/", file_path)
+    if not m:
+        return jsonify({"error": "Cannot parse Drive URL"}), 400
+    zip_drive_id = m.group(1)
+
+    try:
+        zip_bytes = _get_zip_bytes(zip_drive_id)
+    except Exception as e:
+        return jsonify({"error": f"Could not download ZIP: {e}"}), 500
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            # Try exact internal path first
+            names = zf.namelist()
+            if zip_internal in names:
+                pdf_bytes = zf.read(zip_internal)
+            else:
+                # Fall back: match by file name (handles encoding edge cases)
+                matches = [n for n in names if n.split("/")[-1] == file_name]
+                if not matches:
+                    return jsonify({"error": f"File not found in ZIP: {file_name}"}), 404
+                pdf_bytes = zf.read(matches[0])
+    except Exception as e:
+        return jsonify({"error": f"Could not read ZIP: {e}"}), 500
+
+    mime = "application/pdf" if file_name.lower().endswith(".pdf") else "application/octet-stream"
+    return Response(
+        pdf_bytes,
+        mimetype=mime,
+        headers={"Content-Disposition": f'inline; filename="{file_name}"'},
+    )
 
 
 # ── health / diagnostics (no auth) ───────────────────────────────────────────

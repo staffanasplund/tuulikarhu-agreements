@@ -340,15 +340,13 @@
     ).join(", ");
   }
   function fileLink(a) {
-    const url  = a.file_path || a.gdrive_url;
     const name = a.file_name || "—";
-    if (!url) return name;
-    return '<a href="' + encodeURI(url) + '" target="_blank">' + name + '</a>';
+    if (!a.id || (!a.file_path && !a.gdrive_url)) return name;
+    return '<a href="/api/file/' + encodeURIComponent(a.id) + '" target="_blank">' + name + '</a>';
   }
   function driveLink(a) {
-    const url = a.file_path || a.gdrive_url;
-    if (!url) return "";
-    return ' <a href="' + encodeURI(url) + '" target="_blank" style="font-size:11px;color:#2563eb;">GDrive ↗</a>';
+    if (!a.id || (!a.file_path && !a.gdrive_url)) return "";
+    return ' <a href="/api/file/' + encodeURIComponent(a.id) + '" target="_blank" style="font-size:11px;color:#2563eb;">PDF ↗</a>';
   }
   function emptyState(msg) { return '<div class="empty">' + msg + '</div>'; }
 
